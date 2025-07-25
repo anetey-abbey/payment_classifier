@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "payment-classifier"
+version = "0.1.0"
+dependencies = [
+    "openai==1.93.0",
+    "fastapi",
+    "pyyaml",
+    "uvicorn[standard]",
+    "lmstudio==1.4.0",
+    "pandas==2.3.0",
+    "scikit-learn==1.7.0",
+    "jupyter",
+    "python-dotenv"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pyyaml"
+]
