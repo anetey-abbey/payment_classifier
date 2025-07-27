@@ -1,0 +1,9 @@
+payment_categories:
+  - "groceries"
+  - "utilities" 
+  - "transport"
+  - "entertainment"
+  - "healthcare"
+  - "subscription"
+  - "business_expense"
+  - "other"

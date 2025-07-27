@@ -1,0 +1,7 @@
+system_prompt: "You are an expert in payment classification. Answer the question directly."
+
+classify_user_prompt: |
+  Classify this payment transaction into the most suitable category, given all available information.
+  Payment: {payment_text}
+  Choose one most suitable category based on the available information.
+  Available categories: {valid_categories}.

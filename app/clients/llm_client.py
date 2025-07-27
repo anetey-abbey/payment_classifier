@@ -43,6 +43,9 @@ class LocalLMStudioClient(LLMClient):
                 ],
                 response_format=response_model,
             )
-            return response.choices[0].message.parsed
+            parsed = response.choices[0].message.parsed
+            if parsed is None:
+                raise RuntimeError("Failed to parse response")
+            return parsed
         except Exception as e:
             raise RuntimeError(f"Failed to get structured response: {e}")
