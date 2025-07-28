@@ -36,3 +36,7 @@ dev = [
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')"
 ]
+
+[tool.isort]
+profile = "black"
+line_length = 88

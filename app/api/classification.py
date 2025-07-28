@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.clients.llm_client import LLMClient, LocalLMStudioClient
-from app.schemas.classification import PaymentClassification, PaymentData
+from app.schemas.classification import ClassificationRequest, PaymentClassification
 from app.services.classification_service import ClassificationService
 
 router = APIRouter(prefix="/api/v1", tags=["classification"])
@@ -26,7 +26,7 @@ def get_classification_service(
 
 @router.post("/classify", response_model=PaymentClassification)
 async def classify_payment(
-    request: PaymentData,
+    request: ClassificationRequest,
     service: ClassificationService = Depends(get_classification_service),
 ) -> PaymentClassification:
     try:
