@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
     "openai==1.93.0",
     "fastapi",
+    "pydantic",
     "pyyaml",
     "uvicorn[standard]",
     "lmstudio==1.4.0",
@@ -17,8 +18,21 @@ dependencies = [
     "python-dotenv"
 ]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "data*", "config*"]
+
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pyyaml"
+    "pytest-asyncio", 
+    "pytest-cov",
+    "types-PyYAML",
+    "types-requests",
+    "mypy",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')"
 ]

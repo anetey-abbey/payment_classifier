@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 
+from app.api.classification import router as classification_router
 from app.utils.config import get_args, load_config
 
 app = FastAPI(title="Payment Classifier")
+
+app.include_router(classification_router)
 
 
 @app.get("/")
