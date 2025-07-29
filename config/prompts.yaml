@@ -5,3 +5,16 @@ classify_user_prompt: |
   Payment: {payment_text}
   Choose one most suitable category based on the available information.
   Available categories: {valid_categories}.
+
+ollama_json_instruction: |
+  You must respond with a valid JSON object that contains the actual classification data, not the schema definition. 
+
+  The JSON should have these fields:
+  - "category": string (the classification category)
+  - "reasoning": string (explanation for the classification)
+  - "search_used": boolean (whether search was used)
+
+  Example response format:
+  {{"category": "groceries", "reasoning": "This is a food purchase", "search_used": false}}
+
+  Respond only with the JSON object containing the actual data, no schema definition or additional text.
