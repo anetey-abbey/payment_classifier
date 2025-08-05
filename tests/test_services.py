@@ -44,6 +44,8 @@ async def test_classify_payment_success(classification_service):
     request = ClassificationRequest(
         payment_text="Coffee at Starbucks $5.50",
         categories=["groceries", "entertainment", "other"],
+        model_type="local",
+        model_name="qwen2.5:1.5b",
     )
     expected_classification = PaymentClassification(
         category="entertainment", reasoning="Coffee purchase at restaurant/cafe"
@@ -80,7 +82,10 @@ async def test_classify_payment_success(classification_service):
 @pytest.mark.asyncio
 async def test_classify_payment_with_different_text(classification_service):
     request = ClassificationRequest(
-        payment_text="Gas station Shell $45.00", categories=["transport", "other"]
+        payment_text="Gas station Shell $45.00",
+        categories=["transport", "other"],
+        model_type="local",
+        model_name="qwen2.5:1.5b",
     )
     expected_classification = PaymentClassification(
         category="transport", reasoning="Gas station fuel purchase"
@@ -104,7 +109,10 @@ async def test_classify_payment_with_different_text(classification_service):
 @pytest.mark.asyncio
 async def test_classify_payment_llm_error(classification_service):
     request = ClassificationRequest(
-        payment_text="Invalid payment", categories=["other"]
+        payment_text="Invalid payment",
+        categories=["other"],
+        model_type="local",
+        model_name="qwen2.5:1.5b",
     )
 
     classification_service.prompt_loader.get_formatted_prompt.return_value = (
@@ -123,7 +131,12 @@ async def test_classify_payment_llm_error(classification_service):
 
 @pytest.mark.asyncio
 async def test_classify_payment_prompt_loader_error(classification_service):
-    request = ClassificationRequest(payment_text="Test payment", categories=["other"])
+    request = ClassificationRequest(
+        payment_text="Test payment",
+        categories=["other"],
+        model_type="local",
+        model_name="qwen2.5:1.5b",
+    )
 
     classification_service.prompt_loader.get_formatted_prompt.side_effect = KeyError(
         "prompt not found"
@@ -138,7 +151,10 @@ async def test_classify_payment_returns_valid_category(
     classification_service, sample_categories
 ):
     request = ClassificationRequest(
-        payment_text="Walmart grocery purchase $67.84", categories=sample_categories
+        payment_text="Walmart grocery purchase $67.84",
+        categories=sample_categories,
+        model_type="local",
+        model_name="qwen2.5:1.5b",
     )
     valid_category = "groceries"
     assert valid_category in sample_categories
@@ -168,7 +184,10 @@ async def test_classify_payment_with_invalid_category_should_fail_validation(
     classification_service, sample_categories
 ):
     request = ClassificationRequest(
-        payment_text="Coffee at Starbucks $5.50", categories=sample_categories
+        payment_text="Coffee at Starbucks $5.50",
+        categories=sample_categories,
+        model_type="local",
+        model_name="qwen2.5:1.5b",
     )
     invalid_category = "invalid_category"
     assert invalid_category not in sample_categories

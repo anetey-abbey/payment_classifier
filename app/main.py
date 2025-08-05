@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from app.api.classification import router as classification_router
-from app.utils.config import get_args, load_config
+from app.utils.config import load_config
 
 app = FastAPI(title="Payment Classifier")
 
@@ -16,6 +16,5 @@ def root():
 if __name__ == "__main__":
     import uvicorn
 
-    args = get_args()
-    config = load_config(args.config)
+    config = load_config()
     uvicorn.run(app, host="0.0.0.0", port=8000)

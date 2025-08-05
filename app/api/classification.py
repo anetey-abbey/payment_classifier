@@ -1,47 +1,40 @@
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from app.clients.llm_client import LLMClient, LocalLMStudioClient, OllamaClient
-from app.schemas.classification import ClassificationRequest, PaymentClassification
+from app.schemas.classification import (
+    ClassificationRequest,
+    ModelType,
+    PaymentClassification,
+)
 from app.services.classification_service import ClassificationService
 
 router = APIRouter(prefix="/api/v1", tags=["classification"])
 
 
-def get_llm_client() -> LLMClient:
-    client_type = os.getenv("LLM_CLIENT_TYPE", "local").lower()
-
+def create_llm_client(model_type: ModelType, model_name: str) -> LLMClient:
     try:
-        if client_type == "local":
-            base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
-            api_key = os.getenv("LM_STUDIO_API_KEY", "lm-studio")
-            model = os.getenv("LM_STUDIO_MODEL", "qwen3-8b-instruct")
-            return LocalLMStudioClient(base_url=base_url, api_key=api_key, model=model)
-        elif client_type == "ollama":
+        if model_type == ModelType.LOCAL:
             base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
-            return OllamaClient(base_url=base_url, model=model)
+            return OllamaClient(base_url=base_url, model=model_name)
+        elif model_type == ModelType.CLOUD:
+            raise NotImplementedError("Cloud models not yet implemented")
         else:
-            raise ValueError(f"Unsupported LLM client type: {client_type}")
+            raise ValueError(f"Unsupported model type: {model_type}")
     except Exception as e:
         raise ValueError(
-            f"Failed to create LLM client: {str(e)}. Make sure LLM service is running and environment variables are set correctly."
+            f"Failed to create LLM client for {model_type} with model {model_name}: {str(e)}"
         )
-
-
-def get_classification_service(
-    llm_client: LLMClient = Depends(get_llm_client),
-) -> ClassificationService:
-    return ClassificationService(llm_client)
 
 
 @router.post("/classify", response_model=PaymentClassification)
 async def classify_payment(
     request: ClassificationRequest,
-    service: ClassificationService = Depends(get_classification_service),
 ) -> PaymentClassification:
     try:
+        llm_client = create_llm_client(request.model_type, request.model_name)
+        service = ClassificationService(llm_client)
         result = await service.classify_payment(request)
         return result
     except Exception as e:

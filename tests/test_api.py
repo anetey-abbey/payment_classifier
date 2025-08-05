@@ -43,6 +43,8 @@ async def test_classify_payment_success():
             json={
                 "payment_text": "Walmart grocery purchase $45.67",
                 "categories": ["groceries", "transport", "entertainment"],
+                "model_type": "local",
+                "model_name": "qwen2.5:1.5b",
             },
         )
 
@@ -89,7 +91,12 @@ async def test_classify_payment_service_error():
 
         response = client.post(
             "/api/v1/classify",
-            json={"payment_text": "Test payment", "categories": ["groceries", "other"]},
+            json={
+                "payment_text": "Test payment",
+                "categories": ["groceries", "other"],
+                "model_type": "local",
+                "model_name": "qwen2.5:1.5b",
+            },
         )
 
         assert response.status_code == 500
@@ -111,6 +118,8 @@ def test_classify_payment_integration(sample_categories):
         json={
             "payment_text": "Walmart Supercenter grocery shopping $67.84",
             "categories": sample_categories,
+            "model_type": "local",
+            "model_name": "qwen2.5:1.5b",
         },
     )
 
