@@ -7,16 +7,16 @@ name = "payment-classifier"
 version = "0.1.0"
 dependencies = [
     "openai==1.93.0",
-    "fastapi",
-    "pydantic",
-    "pyyaml",
-    "uvicorn[standard]",
+    "fastapi==0.116.1",
+    "pydantic==2.11.7",
+    "pyyaml==6.0.2",
+    "uvicorn[standard]==0.35.0",
     "lmstudio==1.4.0",
     "pandas==2.3.0",
     "scikit-learn==1.7.0",
-    "jupyter",
-    "python-dotenv",
-    "aiohttp"
+    "jupyter==1.1.1",
+    "python-dotenv==1.1.1",
+    "aiohttp==3.12.15"
 ]
 
 [tool.setuptools.packages.find]
