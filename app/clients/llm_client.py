@@ -1,8 +1,10 @@
 import json
+import os
 from abc import ABC, abstractmethod
 from typing import Type, TypeVar
 
 import aiohttp
+import google.generativeai as genai
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -36,7 +38,10 @@ class LocalLMStudioClient(LLMClient):
         self.model = model
 
     async def get_structured_response(
-        self, prompt: str, response_model: Type[T], system_prompt: str = ""
+        self,
+        prompt: str,
+        response_model: Type[T],
+        system_prompt: str = "",
     ) -> T:
         try:
             response = await self.client.beta.chat.completions.parse(
@@ -71,7 +76,10 @@ class OllamaClient(LLMClient):
         return f"{system_prompt}\n" f"{prompt}\n\n" f"{json_instruction}"
 
     async def get_structured_response(
-        self, prompt: str, response_model: Type[T], system_prompt: str = ""
+        self,
+        prompt: str,
+        response_model: Type[T],
+        system_prompt: str = "",
     ) -> T:
         try:
             json_instruction = self.prompt_loader.get_prompt("ollama_json_instruction")
@@ -114,3 +122,82 @@ class OllamaClient(LLMClient):
 
         except Exception as e:
             raise RuntimeError(f"Failed to get structured response: {e}")
+
+
+class GeminiClient(LLMClient):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "gemini-2.5-flash",
+    ):
+        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key is required.")
+
+        genai.configure(api_key=api_key)
+        self.client = genai.GenerativeModel(model)
+        self.model = model
+
+    def _clean_schema_for_gemini(self, schema: dict) -> dict:
+        cleaned = {}
+
+        for key, value in schema.items():
+            # Skip unsupported fields
+            if key in ["title", "$defs", "definitions", "default"]:
+                continue
+            elif key == "type":
+                # Map type to type_
+                cleaned["type_"] = value
+            elif isinstance(value, dict):
+                cleaned[key] = self._clean_schema_for_gemini(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    (
+                        self._clean_schema_for_gemini(item)
+                        if isinstance(item, dict)
+                        else item
+                    )
+                    for item in value
+                ]
+            else:
+                cleaned[key] = value
+
+        return cleaned
+
+    async def get_structured_response(
+        self,
+        prompt: str,
+        response_model: Type[T],
+        system_prompt: str = "",
+    ) -> T:
+        try:
+            schema = response_model.model_json_schema()
+
+            cleaned_schema = self._clean_schema_for_gemini(schema)
+
+            generation_config = genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=cleaned_schema,
+                temperature=0.0,
+            )
+
+            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+
+            response = await self.client.generate_content_async(
+                full_prompt,
+                generation_config=generation_config,
+            )
+
+            if not response.text:
+                raise RuntimeError("Empty response from Gemini")
+
+            try:
+                parsed_json = json.loads(response.text)
+                return response_model.model_validate(parsed_json)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Invalid JSON response: {e}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to validate response: {e}")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to get structured response from Gemini: {e}")

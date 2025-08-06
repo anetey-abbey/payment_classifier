@@ -1,9 +1,10 @@
+import os
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
 
-from app.clients.llm_client import LLMClient, LocalLMStudioClient
+from app.clients.llm_client import GeminiClient, LLMClient, LocalLMStudioClient
 
 
 class MockResponse(BaseModel):
@@ -132,6 +133,24 @@ class TestLocalLMStudioClient:
                 ],
                 response_format=MockResponse,
             )
+
+
+class TestGeminiClient:
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set"
+    )
+    async def test_gemini_real_call(self):
+        client = GeminiClient()
+        result = await client.get_structured_response(
+            prompt="Respond only with the word pong",
+            response_model=MockResponse,
+            system_prompt="Follow instructions exactly.",
+        )
+
+        assert isinstance(result, MockResponse)
+        assert 4 <= len(result.message) <= 20
+        assert "pong" in result.message.lower()
 
 
 class TestLLMClientABC:

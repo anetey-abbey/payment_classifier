@@ -19,9 +19,6 @@ help:
 	@echo "  ollama-pull Pull Ollama model"
 	@echo "  ci          Run continuous integration (format, clean, lint, test-full)"
 
-install:
-	pip install -e .
-
 install-dev:
 	pip install -e ".[dev]"
 
@@ -50,18 +47,6 @@ clean:
 	rm -rf .pytest_cache
 	rm -rf .mypy_cache
 
-build:
-	docker build -t payment-classifier .
-
-run:
-	uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-docker-build:
-	docker build -t payment-classifier .
-
-docker-run:
-	docker run -p 8000:8000 payment-classifier
-
 docker-dev:
 	docker compose -f docker-compose.dev.yml up --build
 
@@ -71,10 +56,6 @@ docker-stop:
 docker-status:
 	@echo "Checking if payment classifier service is running..."
 	@curl -f http://localhost:8000/ || echo "Service not ready yet"
-
-ollama-pull:
-	@echo "Pulling Ollama model..."
-	docker exec payment_classifier-ollama-1 ollama pull qwen2.5:1.5b
 
 ci: format clean lint test-full
 	@echo "CI pipeline completed successfully"

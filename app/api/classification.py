@@ -2,7 +2,7 @@ import os
 
 from fastapi import APIRouter, HTTPException
 
-from app.clients.llm_client import LLMClient, LocalLMStudioClient, OllamaClient
+from app.clients.llm_client import GeminiClient, LLMClient, OllamaClient
 from app.schemas.classification import (
     ClassificationRequest,
     ModelType,
@@ -19,7 +19,7 @@ def create_llm_client(model_type: ModelType, model_name: str) -> LLMClient:
             base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             return OllamaClient(base_url=base_url, model=model_name)
         elif model_type == ModelType.CLOUD:
-            raise NotImplementedError("Cloud models not yet implemented")
+            return GeminiClient(model=model_name)
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
     except Exception as e:

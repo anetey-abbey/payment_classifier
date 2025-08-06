@@ -5,5 +5,4 @@ valid_models:
   local:
     - "qwen2.5:1.5b"
   cloud:
-    - "enter-model1-name"
-    - "enter-model2-name"
+    - "gemini-2.5-flash"
