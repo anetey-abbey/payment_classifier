@@ -1,6 +1,7 @@
 import os
+from typing import Dict, Tuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.clients.llm_client import GeminiClient, LLMClient, OllamaClient
 from app.schemas.classification import (
@@ -28,14 +29,32 @@ def create_llm_client(model_type: ModelType, model_name: str) -> LLMClient:
         )
 
 
+def get_cached_client(
+    clients_cache: Dict[Tuple[str, str], LLMClient],
+    model_type: ModelType,
+    model_name: str,
+) -> LLMClient:
+    cache_key = (model_type.value, model_name)
+
+    if cache_key not in clients_cache:
+        clients_cache[cache_key] = create_llm_client(model_type, model_name)
+
+    return clients_cache[cache_key]
+
+
 @router.post("/classify", response_model=PaymentClassification)
 async def classify_payment(
-    request: ClassificationRequest,
+    classification_request: ClassificationRequest,
+    request: Request,
 ) -> PaymentClassification:
     try:
-        llm_client = create_llm_client(request.model_type, request.model_name)
+        llm_client = get_cached_client(
+            request.app.state.llm_clients,
+            classification_request.model_type,
+            classification_request.model_name,
+        )
         service = ClassificationService(llm_client)
-        result = await service.classify_payment(request)
+        result = await service.classify_payment(classification_request)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

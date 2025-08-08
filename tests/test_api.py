@@ -2,12 +2,8 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.main import app
 from app.schemas.classification import PaymentClassification
-
-client = TestClient(app)
 
 
 @pytest.fixture
@@ -25,7 +21,7 @@ def sample_categories():
 
 
 @pytest.mark.asyncio
-async def test_classify_payment_success():
+async def test_classify_payment_success(client):
     mock_result = PaymentClassification(
         category="groceries",
         reasoning="This appears to be a grocery store purchase",
@@ -55,24 +51,24 @@ async def test_classify_payment_success():
         assert data["search_used"] == False
 
 
-def test_classify_payment_invalid_request():
+def test_classify_payment_invalid_request(client):
     response = client.post("/api/v1/classify", json={})
     assert response.status_code == 422
 
 
-def test_classify_payment_missing_categories():
+def test_classify_payment_missing_categories(client):
     response = client.post("/api/v1/classify", json={"payment_text": "Test payment"})
     assert response.status_code == 422
 
 
-def test_classify_payment_empty_categories():
+def test_classify_payment_empty_categories(client):
     response = client.post(
         "/api/v1/classify", json={"payment_text": "Test payment", "categories": []}
     )
     assert response.status_code == 422
 
 
-def test_classify_payment_too_many_categories():
+def test_classify_payment_too_many_categories(client):
     many_categories = [f"category_{i}" for i in range(25)]
     response = client.post(
         "/api/v1/classify",
@@ -82,7 +78,7 @@ def test_classify_payment_too_many_categories():
 
 
 @pytest.mark.asyncio
-async def test_classify_payment_service_error():
+async def test_classify_payment_service_error(client):
     with patch(
         "app.services.classification_service.ClassificationService.classify_payment",
         new_callable=AsyncMock,
@@ -108,7 +104,7 @@ async def test_classify_payment_service_error():
     os.getenv("RUN_INTEGRATION_TESTS") != "true",
     reason="Integration tests require RUN_INTEGRATION_TESTS=true and running LLM service",
 )
-def test_classify_payment_integration(sample_categories):
+def test_classify_payment_integration(client, sample_categories):
     """
     Integration test that hits the real endpoint with real LLM.
     Requires LM Studio or similar LLM service running on localhost:1234
