@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Type, TypeVar
 
@@ -8,6 +9,7 @@ import google.generativeai as genai
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
+from app.utils.logging import log_llm_call
 from app.utils.prompt_loader import PromptLoader
 
 T = TypeVar("T", bound=BaseModel)
@@ -43,6 +45,8 @@ class LocalLMStudioClient(LLMClient):
         response_model: Type[T],
         system_prompt: str = "",
     ) -> T:
+        start_time = time.time()
+
         try:
             response = await self.client.beta.chat.completions.parse(
                 model=self.model,
@@ -55,8 +59,12 @@ class LocalLMStudioClient(LLMClient):
             parsed = response.choices[0].message.parsed
             if parsed is None:
                 raise RuntimeError("Failed to parse response")
+
+            log_llm_call(self.model, (time.time() - start_time) * 1000, True)
             return parsed
+
         except Exception as e:
+            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
             raise RuntimeError(f"Failed to get structured response: {e}")
 
 
@@ -81,6 +89,8 @@ class OllamaClient(LLMClient):
         response_model: Type[T],
         system_prompt: str = "",
     ) -> T:
+        start_time = time.time()
+
         try:
             json_instruction = self.prompt_loader.get_prompt("ollama_json_instruction")
             full_prompt = self._build_full_prompt(
@@ -114,13 +124,18 @@ class OllamaClient(LLMClient):
 
                     try:
                         parsed_json = json.loads(generated_text)
-                        return response_model.model_validate(parsed_json)
+                        validated = response_model.model_validate(parsed_json)
+                        log_llm_call(
+                            self.model, (time.time() - start_time) * 1000, True
+                        )
+                        return validated
                     except json.JSONDecodeError as e:
                         raise RuntimeError(f"Invalid JSON response: {e}")
                     except Exception as e:
                         raise RuntimeError(f"Failed to validate response: {e}")
 
         except Exception as e:
+            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
             raise RuntimeError(f"Failed to get structured response: {e}")
 
 
@@ -170,9 +185,10 @@ class GeminiClient(LLMClient):
         response_model: Type[T],
         system_prompt: str = "",
     ) -> T:
+        start_time = time.time()
+
         try:
             schema = response_model.model_json_schema()
-
             cleaned_schema = self._clean_schema_for_gemini(schema)
 
             generation_config = genai.GenerationConfig(
@@ -193,11 +209,14 @@ class GeminiClient(LLMClient):
 
             try:
                 parsed_json = json.loads(response.text)
-                return response_model.model_validate(parsed_json)
+                validated = response_model.model_validate(parsed_json)
+                log_llm_call(self.model, (time.time() - start_time) * 1000, True)
+                return validated
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"Invalid JSON response: {e}")
             except Exception as e:
                 raise RuntimeError(f"Failed to validate response: {e}")
 
         except Exception as e:
+            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
             raise RuntimeError(f"Failed to get structured response from Gemini: {e}")
