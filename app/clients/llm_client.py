@@ -1,222 +1,173 @@
-import json
-import os
-import time
-from abc import ABC, abstractmethod
-from typing import Type, TypeVar
+import asyncio
+import uuid
+from typing import Dict, List, Optional, Union
 
-import aiohttp
-import google.generativeai as genai
-from openai import AsyncOpenAI
-from pydantic import BaseModel
-
-from app.utils.logging import log_llm_call
-from app.utils.prompt_loader import PromptLoader
-
-T = TypeVar("T", bound=BaseModel)
-
-
-class LLMClient(ABC):
-    @abstractmethod
-    async def get_structured_response(
-        self,
-        prompt: str,
-        response_model: Type[T],
-        system_prompt: str = "",
-    ) -> T:
-        pass
+from app.clients.base_client import BaseLLMClient
+from app.clients.gemini_client import GeminiClient as _GeminiClient
+from app.clients.ollama_client import OllamaClient as _OllamaClient
+from app.clients.openai_client import OpenAIClient as _OpenAIClient
+from app.core.exceptions import LLMClientError, LLMParseError, LLMTimeoutError
+from app.core.protocols import MetricsCollector, PromptProvider, StructuredLogger
+from app.models.classification import (
+    BaseLLMConfig,
+    ClassificationResult,
+    GeminiConfig,
+    LLMProviderType,
+    OllamaConfig,
+)
 
 
-class LocalLMStudioClient(LLMClient):
+class LLMClientFactory:
     def __init__(
         self,
-        base_url: str = "http://localhost:1234/v1",
-        api_key: str = "lm-studio",
-        model: str = "qwen3-8b-instruct",
+        prompt_provider: PromptProvider,
+        logger: StructuredLogger,
+        metrics: MetricsCollector,
+        **configs: BaseLLMConfig,
     ):
-        self.client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key,
+        self.configs = configs
+        self.creators = {
+            LLMProviderType.OLLAMA: _OllamaClient,
+            LLMProviderType.GEMINI: _GeminiClient,
+            LLMProviderType.OPENAI: _OpenAIClient,
+        }
+        self.prompt_provider = prompt_provider
+        self.logger = logger
+        self.metrics = metrics
+
+    def _override_model_in_config(
+        self,
+        config: BaseLLMConfig,
+        provider_type: LLMProviderType,
+        model_name: str,
+    ) -> BaseLLMConfig:
+        """Override the model in a config instance based on provider type.
+
+        Args:
+            config: Base configuration to copy and modify
+            provider_type: The provider type to determine how to override
+            model_name: The model name to set
+
+        Returns:
+            BaseLLMConfig: A copy of the config with the model overridden
+        """
+        config_copy = config.model_copy()
+
+        if provider_type == LLMProviderType.GEMINI:
+            assert isinstance(config_copy, GeminiConfig)
+            config_copy.model = model_name  # type: ignore
+        elif provider_type == LLMProviderType.OLLAMA:
+            assert isinstance(config_copy, OllamaConfig)
+            config_copy.model = model_name
+
+        return config_copy
+
+    async def create_client(
+        self,
+        provider_type: Union[str, LLMProviderType],
+        model_name: Optional[str] = None,
+    ) -> BaseLLMClient:
+        """Create an LLM client with dynamic model selection.
+
+        This method creates a client instance using the base configuration for the
+        provider type, but allows overriding the specific model if model_name is
+        provided. This enables runtime model selection while maintaining efficient
+        client caching based on provider+model combinations.
+
+        Args:
+            provider_type: The LLM provider (e.g., 'gemini', 'ollama', 'openai')
+            model_name: Optional specific model to use (e.g., 'gemini-1.5-flash').
+                       If None, uses the default model from the provider config.
+
+        Returns:
+            BaseLLMClient: Configured client instance for the requested provider/model
+
+        Raises:
+            LLMClientError: If the provider type is unknown or unsupported
+        """
+        if isinstance(provider_type, str):
+            provider_type = LLMProviderType(provider_type.lower())
+
+        config = self.configs.get(provider_type.name.lower())
+        creator_func = self.creators.get(provider_type)
+        if not config or not creator_func:
+            raise LLMClientError(f"Unknown provider type: {provider_type}")
+
+        # Override model in config if model_name is provided
+        if model_name and provider_type in (
+            LLMProviderType.GEMINI,
+            LLMProviderType.OLLAMA,
+        ):
+            config = self._override_model_in_config(config, provider_type, model_name)
+
+        client = creator_func(
+            config,
+            self.prompt_provider,
+            self.logger,
+            self.metrics,
         )
-        self.model = model
-
-    async def get_structured_response(
-        self,
-        prompt: str,
-        response_model: Type[T],
-        system_prompt: str = "",
-    ) -> T:
-        start_time = time.time()
-
-        try:
-            response = await self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format=response_model,
-            )
-            parsed = response.choices[0].message.parsed
-            if parsed is None:
-                raise RuntimeError("Failed to parse response")
-
-            log_llm_call(self.model, (time.time() - start_time) * 1000, True)
-            return parsed
-
-        except Exception as e:
-            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
-            raise RuntimeError(f"Failed to get structured response: {e}")
+        await client._setup()
+        return client
 
 
-class OllamaClient(LLMClient):
+class LLMClientManager:
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5:3b",
+        factory: LLMClientFactory,
+        logger: StructuredLogger,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.prompt_loader = PromptLoader()
+        self.factory = factory
+        self.logger = logger
+        self._clients: Dict[str, BaseLLMClient] = {}
+        self._lock = asyncio.Lock()
 
-    def _build_full_prompt(
-        self, system_prompt: str, prompt: str, json_instruction: str
-    ) -> str:
-        return f"{system_prompt}\n" f"{prompt}\n\n" f"{json_instruction}"
-
-    async def get_structured_response(
+    async def get_client(
         self,
-        prompt: str,
-        response_model: Type[T],
-        system_prompt: str = "",
-    ) -> T:
-        start_time = time.time()
+        provider_type: Union[str, LLMProviderType],
+        model_name: Optional[str] = None,
+    ) -> BaseLLMClient:
+        provider_key = (
+            provider_type.value
+            if isinstance(provider_type, LLMProviderType)
+            else provider_type.lower()
+        )
 
-        try:
-            json_instruction = self.prompt_loader.get_prompt("ollama_json_instruction")
-            full_prompt = self._build_full_prompt(
-                system_prompt, prompt, json_instruction
-            )
+        # Create unique key based on provider and model
+        key = f"{provider_key}:{model_name}" if model_name else provider_key
 
-            async with aiohttp.ClientSession() as session:
-                payload = {
-                    "model": self.model,
-                    "prompt": full_prompt,
-                    "stream": False,
-                    "format": "json",
-                }
+        async with self._lock:
+            if key not in self._clients:
+                self.logger.info(
+                    "Creating new LLM client", provider=provider_key, model=model_name
+                )
+                self._clients[key] = await self.factory.create_client(
+                    provider_type, model_name
+                )
+            return self._clients[key]
 
-                async with session.post(
-                    f"{self.base_url}/api/generate",
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise RuntimeError(
-                            f"Ollama API error {response.status}: {error_text}"
-                        )
-
-                    result = await response.json()
-                    generated_text = result.get("response", "").strip()
-
-                    if not generated_text:
-                        raise RuntimeError("Empty response from Ollama")
-
-                    try:
-                        parsed_json = json.loads(generated_text)
-                        validated = response_model.model_validate(parsed_json)
-                        log_llm_call(
-                            self.model, (time.time() - start_time) * 1000, True
-                        )
-                        return validated
-                    except json.JSONDecodeError as e:
-                        raise RuntimeError(f"Invalid JSON response: {e}")
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to validate response: {e}")
-
-        except Exception as e:
-            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
-            raise RuntimeError(f"Failed to get structured response: {e}")
-
-
-class GeminiClient(LLMClient):
-    def __init__(
+    async def classify(
         self,
-        api_key: str | None = None,
-        model: str = "gemini-2.5-flash",
-    ):
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("Google API key is required.")
+        provider_type: Union[str, LLMProviderType],
+        payment_text: str,
+        categories: List[str],
+        use_search: bool = False,
+        model_name: Optional[str] = None,
+        **kwargs,
+    ) -> ClassificationResult:
+        client = await self.get_client(provider_type, model_name)
+        correlation_id = kwargs.get("correlation_id", str(uuid.uuid4()))
+        return await client.classify(
+            payment_text, categories, correlation_id, use_search
+        )
 
-        genai.configure(api_key=api_key)
-        self.client = genai.GenerativeModel(model)
-        self.model = model
+    async def close_all(self):
+        async with self._lock:
+            for client in self._clients.values():
+                await client._cleanup()
+            self._clients.clear()
 
-    def _clean_schema_for_gemini(self, schema: dict) -> dict:
-        cleaned = {}
+    async def __aenter__(self):
+        return self
 
-        for key, value in schema.items():
-            # Skip unsupported fields
-            if key in ["title", "$defs", "definitions", "default"]:
-                continue
-            elif key == "type":
-                # Map type to type_
-                cleaned["type_"] = value
-            elif isinstance(value, dict):
-                cleaned[key] = self._clean_schema_for_gemini(value)
-            elif isinstance(value, list):
-                cleaned[key] = [
-                    (
-                        self._clean_schema_for_gemini(item)
-                        if isinstance(item, dict)
-                        else item
-                    )
-                    for item in value
-                ]
-            else:
-                cleaned[key] = value
-
-        return cleaned
-
-    async def get_structured_response(
-        self,
-        prompt: str,
-        response_model: Type[T],
-        system_prompt: str = "",
-    ) -> T:
-        start_time = time.time()
-
-        try:
-            schema = response_model.model_json_schema()
-            cleaned_schema = self._clean_schema_for_gemini(schema)
-
-            generation_config = genai.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=cleaned_schema,
-                temperature=0.0,
-            )
-
-            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-
-            response = await self.client.generate_content_async(
-                full_prompt,
-                generation_config=generation_config,
-            )
-
-            if not response.text:
-                raise RuntimeError("Empty response from Gemini")
-
-            try:
-                parsed_json = json.loads(response.text)
-                validated = response_model.model_validate(parsed_json)
-                log_llm_call(self.model, (time.time() - start_time) * 1000, True)
-                return validated
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"Invalid JSON response: {e}")
-            except Exception as e:
-                raise RuntimeError(f"Failed to validate response: {e}")
-
-        except Exception as e:
-            log_llm_call(self.model, (time.time() - start_time) * 1000, False, str(e))
-            raise RuntimeError(f"Failed to get structured response from Gemini: {e}")
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
+        await self.close_all()

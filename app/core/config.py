@@ -18,7 +18,6 @@ def load_config():
         os.path.dirname(__file__), f"../../config/{env}.yaml"
     )
 
-    # Load base config first
     base_config_path = os.path.join(os.path.dirname(__file__), "../../config/base.yaml")
     if os.path.exists(base_config_path):
         with open(base_config_path, "r") as f:

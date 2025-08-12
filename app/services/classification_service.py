@@ -1,50 +1,67 @@
 import time
+from typing import Optional
 
-from app.clients.llm_client import LLMClient
-from app.schemas.classification import ClassificationRequest, PaymentClassification
-from app.utils.logging import log_classification
-from app.utils.prompt_loader import PromptLoader
+from app.clients.llm_client import LLMClientManager
+from app.core.exceptions import LLMClientError, LLMParseError, LLMTimeoutError
+from app.core.logging import log_classification
+from app.models.classification import ClassificationRequest, PaymentClassification
 
 
 class ClassificationService:
-    def __init__(self, llm_client: LLMClient):
-        self.llm_client = llm_client
-        self.prompt_loader = PromptLoader()
+    def __init__(self, llm_client_manager: LLMClientManager):
+        self.llm_client_manager = llm_client_manager
 
-    async def classify_payment(
-        self, request: ClassificationRequest
+    async def classify(
+        self, classification_request: ClassificationRequest
     ) -> PaymentClassification:
         start_time = time.time()
-        error = None
+        error: Optional[Exception] = None
         result = None
 
         try:
-            payment_text = request.payment_text
-            valid_categories = ", ".join(request.categories)
+            if classification_request.model_type.value == "local":
+                provider_type = "ollama"
+            else:
+                provider_type = "gemini"
 
-            prompt = self.prompt_loader.get_formatted_prompt(
-                key="classify_user_prompt",
-                payment_text=payment_text,
-                valid_categories=valid_categories,
+            result = await self.llm_client_manager.classify(
+                provider_type=provider_type,
+                payment_text=classification_request.payment_text,
+                categories=classification_request.categories,
+                use_search=classification_request.use_search,
+                model_name=classification_request.model_name,
             )
-            system_prompt = self.prompt_loader.get_prompt(key="system_prompt")
-            result = await self.llm_client.get_structured_response(
-                prompt=prompt,
-                response_model=PaymentClassification,
-                system_prompt=system_prompt,
-            )
-            return result
 
+            classification_result = PaymentClassification(
+                category=result.category,
+                reasoning=result.reasoning,
+                search_used=result.metadata.get("search_used", False),
+            )
+
+            return classification_result
+
+        except (
+            LLMTimeoutError,
+            LLMParseError,
+            LLMClientError,
+            ValueError,
+        ) as e:
+            error = e
+            raise
         except Exception as e:
-            error = str(e)
+            error = e
             raise
 
         finally:
             duration_ms = (time.time() - start_time) * 1000
+            model_name = result.model_used if result else "unknown"
+            if model_name is None:
+                model_name = "unknown"
+
             log_classification(
-                model_name=getattr(self.llm_client, "model", "unknown"),
+                model_name=model_name,
                 result_category=result.category if result else None,
                 duration_ms=duration_ms,
-                confidence=getattr(result, "confidence", None) if result else None,
-                error=error,
+                confidence=result.confidence if result else None,
+                error=str(error) if error else None,
             )

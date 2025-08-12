@@ -1,9 +1,10 @@
+import uuid
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PositiveFloat, PositiveInt, field_validator
 
-from app.utils.config import load_config
+from app.core.config import load_config
 
 
 class ActionType(str, Enum):
@@ -35,9 +36,6 @@ class ClassificationRequest(BaseModel):
     )
     use_search: bool = Field(
         default=False, description="Enable internet search for local models"
-    )
-    use_vector_db: bool = Field(
-        default=False, description="Enable vector database search for local models"
     )
 
     @field_validator("categories")
@@ -85,14 +83,13 @@ class ClassificationRequest(BaseModel):
 
         return v.strip()
 
-    @field_validator("use_search", "use_vector_db")
+    @field_validator("use_search")
     @classmethod
     def validate_search_options(cls, v, info):
         model_type = info.data.get("model_type")
-        field_name = info.field_name
 
         if v and model_type == ModelType.CLOUD:
-            raise ValueError(f"{field_name} is not supported for cloud models")
+            raise ValueError("use_search is not supported for cloud models")
 
         return v
 
@@ -108,3 +105,54 @@ class PaymentClassification(BaseModel):
     category: str
     reasoning: str
     search_used: bool = False
+
+
+class ClassificationResult(BaseModel):
+    category: str
+    reasoning: str
+    confidence: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    model_used: Optional[str] = None
+    processing_time_ms: Optional[float] = None
+
+
+class LLMProviderType(Enum):
+    OLLAMA = "ollama"
+    GEMINI = "gemini"
+    OPENAI = "openai"
+
+
+class BaseLLMConfig(BaseModel):
+
+    timeout: PositiveFloat = 30.0
+    max_retries: PositiveInt = 3
+    max_concurrent_requests: PositiveInt = 10
+    max_categories: PositiveInt = 50
+    max_payment_text_length: PositiveInt = 10000
+    enable_request_logging: bool = True
+    enable_response_logging: bool = False
+
+
+class OllamaConfig(BaseLLMConfig):
+    base_url: str = "http://localhost:11434"
+    model: str = "qwen2.5:1.5b"
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    google_api_key: Optional[str] = None
+    google_search_engine_id: Optional[str] = None
+
+
+class GeminiConfig(BaseLLMConfig):
+    api_key: Optional[str] = None
+    model: Literal["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"] = (
+        "gemini-2.5-flash"
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_output_tokens: PositiveInt = 1024
+
+
+class OpenAIConfig(BaseLLMConfig):
+    api_key: Optional[str] = None
+    model: str = "gpt-4o-mini"
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_tokens: PositiveInt = 1024

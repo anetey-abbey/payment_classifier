@@ -2,162 +2,126 @@ import os
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from pydantic import BaseModel
 
-from app.clients.llm_client import GeminiClient, LLMClient, LocalLMStudioClient
-
-
-class MockResponse(BaseModel):
-    message: str
-    value: int
+from app.clients.gemini_client import GeminiClient
+from app.clients.ollama_client import OllamaClient
+from app.core.exceptions import LLMClientError, LLMParseError, LLMTimeoutError
+from app.models.classification import GeminiConfig, OllamaConfig
 
 
-class TestLocalLMStudioClient:
+class TestOllamaClient:
     @pytest.fixture
     def client(self):
-        return LocalLMStudioClient()
-
-    @pytest.fixture
-    def mock_openai_client(self):
-        return AsyncMock()
-
-    @pytest.fixture
-    def mock_response(self):
-        mock_choice = Mock()
-        mock_choice.message.parsed = MockResponse(message="test", value=42)
-        mock_resp = Mock()
-        mock_resp.choices = [mock_choice]
-        return mock_resp
+        config = OllamaConfig(base_url="http://localhost:11434", model="qwen2.5:1.5b")
+        mock_prompt_provider = Mock()
+        return OllamaClient(config, mock_prompt_provider)
 
     def test_client_initialization_custom_params(self):
-        client = LocalLMStudioClient(
-            base_url="http://custom:8080/v1", api_key="custom-key", model="custom-model"
-        )
-        assert client.model == "custom-model"
+        config = OllamaConfig(base_url="http://custom:8080", model="custom-model")
+        mock_prompt_provider = Mock()
+        client = OllamaClient(config, mock_prompt_provider)
+        assert client.ollama_config.model == "custom-model"
+        assert client.ollama_config.base_url == "http://custom:8080"
 
     @pytest.mark.asyncio
-    async def test_get_structured_response_success(
-        self, client, mock_openai_client, mock_response
-    ):
-        with patch.object(client, "client", mock_openai_client):
-            mock_openai_client.beta.chat.completions.parse.return_value = mock_response
+    async def test_classify_success(self, client):
+        mock_response_data = {
+            "response": '{"category": "transport", "reasoning": "Gas station purchase"}'
+        }
 
-            result = await client.get_structured_response(
-                prompt="test prompt",
-                response_model=MockResponse,
-                system_prompt="test system",
-            )
+        with patch.object(client, "_make_classification_request") as mock_request:
+            mock_request.return_value = mock_response_data
 
-            assert isinstance(result, MockResponse)
-            assert result.message == "test"
-            assert result.value == 42
+            with patch("app.core.prompt_loader.PromptLoader") as mock_loader_class:
+                mock_loader = Mock()
+                mock_loader.get_formatted_prompt.return_value = "Classify: Gas station"
+                mock_loader.get_prompt.side_effect = [
+                    "System prompt",
+                    "JSON instruction",
+                ]
+                mock_loader_class.return_value = mock_loader
 
-            mock_openai_client.beta.chat.completions.parse.assert_called_once_with(
-                model="qwen3-8b-instruct",
-                messages=[
-                    {"role": "system", "content": "test system"},
-                    {"role": "user", "content": "test prompt"},
-                ],
-                response_format=MockResponse,
-            )
+                async with client:
+                    result = await client.classify(
+                        payment_text="Shell gas station",
+                        categories=["transport", "other"],
+                    )
 
-    @pytest.mark.asyncio
-    async def test_get_structured_response_empty_system_prompt(
-        self, client, mock_openai_client, mock_response
-    ):
-        with patch.object(client, "client", mock_openai_client):
-            mock_openai_client.beta.chat.completions.parse.return_value = mock_response
-
-            result = await client.get_structured_response(
-                prompt="test prompt", response_model=MockResponse
-            )
-
-            mock_openai_client.beta.chat.completions.parse.assert_called_once_with(
-                model="qwen3-8b-instruct",
-                messages=[
-                    {"role": "system", "content": ""},
-                    {"role": "user", "content": "test prompt"},
-                ],
-                response_format=MockResponse,
-            )
+                    assert result.category == "transport"
+                    assert result.reasoning == "Gas station purchase"
 
     @pytest.mark.asyncio
-    async def test_get_structured_response_api_error(self, client, mock_openai_client):
-        mock_openai_client.beta.chat.completions.parse.side_effect = Exception(
-            "API Error"
-        )
+    async def test_classify_timeout_status(self, client):
+        with patch.object(client, "_make_classification_request") as mock_request:
+            from app.core.exceptions import LLMTimeoutError
 
-        with patch.object(client, "client", mock_openai_client):
-            with pytest.raises(Exception, match="API Error"):
-                await client.get_structured_response(
-                    prompt="test", response_model=MockResponse
-                )
-
-    @pytest.mark.asyncio
-    async def test_get_structured_response_missing_parsed_attribute(
-        self, client, mock_openai_client
-    ):
-        mock_choice = Mock()
-        del mock_choice.message.parsed
-        mock_resp = Mock()
-        mock_resp.choices = [mock_choice]
-        mock_openai_client.beta.chat.completions.parse.return_value = mock_resp
-
-        with patch.object(client, "client", mock_openai_client):
-            with pytest.raises(RuntimeError, match="Failed to get structured response"):
-                await client.get_structured_response(
-                    prompt="test", response_model=MockResponse
-                )
-
-    @pytest.mark.asyncio
-    async def test_get_structured_response_with_custom_model(self):
-        client = LocalLMStudioClient(model="custom-model")
-        mock_openai_client = AsyncMock()
-        mock_choice = Mock()
-        mock_choice.message.parsed = MockResponse(message="custom", value=100)
-        mock_resp = Mock()
-        mock_resp.choices = [mock_choice]
-        mock_openai_client.beta.chat.completions.parse.return_value = mock_resp
-
-        with patch.object(client, "client", mock_openai_client):
-            result = await client.get_structured_response(
-                prompt="test", response_model=MockResponse
+            mock_request.side_effect = LLMTimeoutError(
+                "Ollama timed out (status 408)", "test-id", "qwen2.5:1.5b"
             )
 
-            assert result.message == "custom"
-            mock_openai_client.beta.chat.completions.parse.assert_called_once_with(
-                model="custom-model",
-                messages=[
-                    {"role": "system", "content": ""},
-                    {"role": "user", "content": "test"},
-                ],
-                response_format=MockResponse,
-            )
+            with patch("app.core.prompt_loader.PromptLoader"):
+                async with client:
+                    with pytest.raises(LLMTimeoutError, match="Ollama timed out"):
+                        await client.classify("test", ["category"])
+
+    @pytest.mark.asyncio
+    async def test_classify_invalid_json(self, client):
+        mock_response_data = {"response": "invalid json{"}
+
+        with patch.object(client, "_make_classification_request") as mock_request:
+            mock_request.return_value = mock_response_data
+
+            with patch("app.core.prompt_loader.PromptLoader"):
+                async with client:
+                    with pytest.raises(
+                        LLMParseError, match="Invalid JSON response from Ollama"
+                    ):
+                        await client.classify("test", ["category"])
 
 
 class TestGeminiClient:
+    def test_client_initialization_no_api_key(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(LLMClientError, match="Google API key is required"):
+                config = GeminiConfig(api_key=None)
+                mock_prompt_provider = Mock()
+                GeminiClient(config, mock_prompt_provider)
+
+    def test_client_initialization_with_api_key(self):
+        with patch("google.generativeai.configure") as mock_configure:
+            with patch("google.generativeai.GenerativeModel") as mock_model:
+                config = GeminiConfig(api_key="test-key")
+                mock_prompt_provider = Mock()
+                client = GeminiClient(config, mock_prompt_provider)
+                assert client.get_model_name() == "gemini-2.5-flash"
+                mock_configure.assert_called_once_with(api_key="test-key")
+
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set"
-    )
-    async def test_gemini_real_call(self):
-        client = GeminiClient()
-        result = await client.get_structured_response(
-            prompt="Respond only with the word pong",
-            response_model=MockResponse,
-            system_prompt="Follow instructions exactly.",
-        )
+    async def test_classify_success(self):
+        with patch("google.generativeai.configure"):
+            with patch("google.generativeai.GenerativeModel") as mock_model_class:
+                mock_model = AsyncMock()
+                mock_response = Mock()
+                mock_response.text = (
+                    '{"category": "groceries", "reasoning": "Supermarket purchase"}'
+                )
+                mock_model.generate_content_async.return_value = mock_response
+                mock_model_class.return_value = mock_model
 
-        assert isinstance(result, MockResponse)
-        assert 4 <= len(result.message) <= 20
-        assert "pong" in result.message.lower()
+                config = GeminiConfig(api_key="test-key")
+                mock_prompt_provider = Mock()
+                client = GeminiClient(config, mock_prompt_provider)
 
+                with patch("app.core.prompt_loader.PromptLoader") as mock_loader_class:
+                    mock_loader = Mock()
+                    mock_loader.get_formatted_prompt.return_value = "Classify: Walmart"
+                    mock_loader.get_prompt.return_value = "System prompt"
+                    mock_loader_class.return_value = mock_loader
 
-class TestLLMClientABC:
-    def test_cannot_instantiate_abstract_class(self):
-        with pytest.raises(TypeError):
-            LLMClient()
+                    result = await client.classify(
+                        payment_text="Walmart grocery",
+                        categories=["groceries", "other"],
+                    )
 
-    def test_abstract_method_signature(self):
-        assert hasattr(LLMClient, "get_structured_response")
-        assert LLMClient.get_structured_response.__isabstractmethod__
+                    assert result.category == "groceries"
+                    assert result.reasoning == "Supermarket purchase"

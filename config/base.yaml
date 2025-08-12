@@ -1,8 +1,17 @@
 app_name: "Payment Classifier"
+app_version: "0.1"
+app_description: "Payment classification API service using LLM models"
 api_version: "v1"
 
 valid_models:
   local:
     - "qwen2.5:1.5b"
   cloud:
+    - "gemini-1.5-flash"
+    - "gemini-1.5-pro"
     - "gemini-2.5-flash"
+
+google_search:
+  max_results: 3
+  timeout: 10.0
+  max_retries: 3

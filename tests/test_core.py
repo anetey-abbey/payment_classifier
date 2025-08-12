@@ -4,8 +4,8 @@ from unittest.mock import mock_open, patch
 import pytest
 import yaml
 
-from app.utils.config import load_config
-from app.utils.prompt_loader import PromptLoader
+from app.core.config import load_config
+from app.core.prompt_loader import PromptLoader
 
 
 class TestPromptLoader:
