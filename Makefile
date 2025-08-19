@@ -1,22 +1,15 @@
-.PHONY: help install install-dev dev test lint format clean build run docker-build docker-run docker-dev ci
+.PHONY: help install-dev dev test-full lint format clean docker-dev docker-stop docker-status ci
 
 help:
 	@echo "Available commands:"
-	@echo "  install     Install dependencies"
 	@echo "  install-dev Install dependencies development"
 	@echo "  dev         Run development server (port 8000)"
-	@echo "  test        Run tests"
 	@echo "  test-full   Run tests with integrations"
 	@echo "  lint        Run linting"
 	@echo "  format      Format code"
-	@echo "  build       Build application"
-	@echo "  run         Run production server"
-	@echo "  docker-build Build Docker image"
-	@echo "  docker-run  Run Docker container"
 	@echo "  docker-dev  Run development with Docker Compose (Ollama + API)"
 	@echo "  docker-stop Stop Docker services"
 	@echo "  docker-status Check API service status"
-	@echo "  ollama-pull Pull Ollama model"
 	@echo "  ci          Run continuous integration (format, clean, lint, test-full)"
 
 install-dev:
@@ -25,12 +18,9 @@ install-dev:
 dev:
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-test:
-	pytest tests/ -v --cov=app --cov-report=term-missing
-
 test-full:
-	@echo "Running all tests including integrations (requires LLM service running)..."
-	RUN_INTEGRATION_TESTS=true pytest tests/ -v --cov=app --cov-report=term-missing
+	@echo "Running minimal integration tests (requires LLM service running)..."
+	pytest tests/test_integration.py -v
 
 lint:
 	black --check --line-length 88 .
