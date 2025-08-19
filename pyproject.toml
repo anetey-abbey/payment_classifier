@@ -17,7 +17,8 @@ dependencies = [
     "jupyter==1.1.1",
     "python-dotenv==1.1.1",
     "aiohttp==3.12.15",
-    "google-generativeai"
+    "google-generativeai",
+    "tenacity",
 ]
 
 [tool.setuptools.packages.find]
@@ -29,16 +30,19 @@ dev = [
     "pytest",
     "pytest-asyncio", 
     "pytest-cov",
+    "requests",
+    "isort",
     "types-PyYAML",
     "types-requests",
     "mypy",
+    "black[jupyter]",
 ]
 
 [tool.pytest.ini_options]
-markers = [
-    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')"
-]
 
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.mypy]
+ignore_missing_imports = true

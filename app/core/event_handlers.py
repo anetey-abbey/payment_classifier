@@ -20,22 +20,32 @@ async def lifespan(app: FastAPI):
     logger = DefaultStructuredLogger()
     metrics = DefaultMetricsCollector()
 
-    configs = {
-        "ollama": OllamaConfig(
+    model_configs = {
+        "qwen2.5:1.5b": OllamaConfig(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            model=os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+            model="qwen2.5:1.5b",
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             google_search_engine_id=os.getenv("GOOGLE_SEARCH_ENGINE_ID"),
         ),
-        "gemini": GeminiConfig(api_key=os.getenv("GOOGLE_API_KEY")),
-        "openai": OpenAIConfig(),
+        "gemini-1.5-flash": GeminiConfig(
+            api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-1.5-flash"
+        ),
+        "gemini-1.5-pro": GeminiConfig(
+            api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-1.5-pro"
+        ),
+        "gemini-2.5-flash": GeminiConfig(
+            api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.5-flash"
+        ),
+        "gpt-4o-mini": OpenAIConfig(
+            api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini"
+        ),
     }
 
     factory = LLMClientFactory(
         prompt_provider,
         logger,
         metrics,
-        **configs,
+        model_configs,
     )
     client_manager = LLMClientManager(factory, logger)
 

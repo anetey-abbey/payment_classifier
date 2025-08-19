@@ -24,9 +24,7 @@ services:
       - ./app:/app/app
       - ./config:/app/config
     environment:
-      - LLM_CLIENT_TYPE=ollama
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=qwen2.5:1.5b
     env_file:
       - .env
     depends_on:

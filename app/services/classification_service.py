@@ -19,17 +19,11 @@ class ClassificationService:
         result = None
 
         try:
-            if classification_request.model_type.value == "local":
-                provider_type = "ollama"
-            else:
-                provider_type = "gemini"
-
             result = await self.llm_client_manager.classify(
-                provider_type=provider_type,
+                model_name=classification_request.model_name,
                 payment_text=classification_request.payment_text,
                 categories=classification_request.categories,
                 use_search=classification_request.use_search,
-                model_name=classification_request.model_name,
             )
 
             classification_result = PaymentClassification(

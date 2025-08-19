@@ -23,8 +23,6 @@ RUN useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
 
-# No additional runtime dependencies needed
-
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin

@@ -7,6 +7,7 @@ from app.core.event_handlers import get_lifespan_handler
 
 def get_app() -> FastAPI:
     config = load_config()
+
     app = FastAPI(
         title=config["app_name"],
         version=config["app_version"],

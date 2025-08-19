@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from typing import Dict, List, Optional, Union
+from typing import Dict, List
 
 from app.clients.base_client import BaseLLMClient
 from app.clients.gemini_client import GeminiClient as _GeminiClient
@@ -23,82 +23,54 @@ class LLMClientFactory:
         prompt_provider: PromptProvider,
         logger: StructuredLogger,
         metrics: MetricsCollector,
-        **configs: BaseLLMConfig,
+        model_configs: Dict[str, BaseLLMConfig],
     ):
-        self.configs = configs
+        self.model_configs = model_configs
         self.creators = {
             LLMProviderType.OLLAMA: _OllamaClient,
             LLMProviderType.GEMINI: _GeminiClient,
             LLMProviderType.OPENAI: _OpenAIClient,
         }
+        self._model_to_provider = self._build_model_provider_mapping()
         self.prompt_provider = prompt_provider
         self.logger = logger
         self.metrics = metrics
 
-    def _override_model_in_config(
-        self,
-        config: BaseLLMConfig,
-        provider_type: LLMProviderType,
-        model_name: str,
-    ) -> BaseLLMConfig:
-        """Override the model in a config instance based on provider type.
+    def _build_model_provider_mapping(self) -> Dict[str, LLMProviderType]:
+        """Build mapping from model names to their provider types."""
+        mapping = {}
+        for model_name in self.model_configs:
+            if model_name.startswith("gemini-"):
+                mapping[model_name] = LLMProviderType.GEMINI
+            elif model_name.startswith("gpt-") or model_name in ["gpt-4o-mini"]:
+                mapping[model_name] = LLMProviderType.OPENAI
+            else:
+                mapping[model_name] = LLMProviderType.OLLAMA
+        return mapping
+
+    async def create_client(self, model_name: str) -> BaseLLMClient:
+        """Create an LLM client for the specified model.
 
         Args:
-            config: Base configuration to copy and modify
-            provider_type: The provider type to determine how to override
-            model_name: The model name to set
+            model_name: The specific model to use (e.g., 'gemini-1.5-flash', 'qwen2.5:1.5b')
 
         Returns:
-            BaseLLMConfig: A copy of the config with the model overridden
-        """
-        config_copy = config.model_copy()
-
-        if provider_type == LLMProviderType.GEMINI:
-            assert isinstance(config_copy, GeminiConfig)
-            config_copy.model = model_name  # type: ignore
-        elif provider_type == LLMProviderType.OLLAMA:
-            assert isinstance(config_copy, OllamaConfig)
-            config_copy.model = model_name
-
-        return config_copy
-
-    async def create_client(
-        self,
-        provider_type: Union[str, LLMProviderType],
-        model_name: Optional[str] = None,
-    ) -> BaseLLMClient:
-        """Create an LLM client with dynamic model selection.
-
-        This method creates a client instance using the base configuration for the
-        provider type, but allows overriding the specific model if model_name is
-        provided. This enables runtime model selection while maintaining efficient
-        client caching based on provider+model combinations.
-
-        Args:
-            provider_type: The LLM provider (e.g., 'gemini', 'ollama', 'openai')
-            model_name: Optional specific model to use (e.g., 'gemini-1.5-flash').
-                       If None, uses the default model from the provider config.
-
-        Returns:
-            BaseLLMClient: Configured client instance for the requested provider/model
+            BaseLLMClient: Configured client instance for the requested model
 
         Raises:
-            LLMClientError: If the provider type is unknown or unsupported
+            LLMClientError: If the model is unknown or unsupported
         """
-        if isinstance(provider_type, str):
-            provider_type = LLMProviderType(provider_type.lower())
+        config = self.model_configs.get(model_name)
+        if not config:
+            raise LLMClientError(f"Unknown model: {model_name}")
 
-        config = self.configs.get(provider_type.name.lower())
+        provider_type = self._model_to_provider.get(model_name)
+        if not provider_type:
+            raise LLMClientError(f"Cannot determine provider for model: {model_name}")
+
         creator_func = self.creators.get(provider_type)
-        if not config or not creator_func:
+        if not creator_func:
             raise LLMClientError(f"Unknown provider type: {provider_type}")
-
-        # Override model in config if model_name is provided
-        if model_name and provider_type in (
-            LLMProviderType.GEMINI,
-            LLMProviderType.OLLAMA,
-        ):
-            config = self._override_model_in_config(config, provider_type, model_name)
 
         client = creator_func(
             config,
@@ -121,40 +93,22 @@ class LLMClientManager:
         self._clients: Dict[str, BaseLLMClient] = {}
         self._lock = asyncio.Lock()
 
-    async def get_client(
-        self,
-        provider_type: Union[str, LLMProviderType],
-        model_name: Optional[str] = None,
-    ) -> BaseLLMClient:
-        provider_key = (
-            provider_type.value
-            if isinstance(provider_type, LLMProviderType)
-            else provider_type.lower()
-        )
-
-        # Create unique key based on provider and model
-        key = f"{provider_key}:{model_name}" if model_name else provider_key
-
+    async def get_client(self, model_name: str) -> BaseLLMClient:
         async with self._lock:
-            if key not in self._clients:
-                self.logger.info(
-                    "Creating new LLM client", provider=provider_key, model=model_name
-                )
-                self._clients[key] = await self.factory.create_client(
-                    provider_type, model_name
-                )
-            return self._clients[key]
+            if model_name not in self._clients:
+                self.logger.info("Creating new LLM client", model=model_name)
+                self._clients[model_name] = await self.factory.create_client(model_name)
+            return self._clients[model_name]
 
     async def classify(
         self,
-        provider_type: Union[str, LLMProviderType],
+        model_name: str,
         payment_text: str,
         categories: List[str],
         use_search: bool = False,
-        model_name: Optional[str] = None,
         **kwargs,
     ) -> ClassificationResult:
-        client = await self.get_client(provider_type, model_name)
+        client = await self.get_client(model_name)
         correlation_id = kwargs.get("correlation_id", str(uuid.uuid4()))
         return await client.classify(
             payment_text, categories, correlation_id, use_search
@@ -169,5 +123,6 @@ class LLMClientManager:
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close_all()
+        return None

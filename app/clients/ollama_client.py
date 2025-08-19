@@ -37,7 +37,6 @@ class OllamaClient(BaseLLMClient):
                 search_engine_id=config.google_search_engine_id,
                 logger=self.logger,
                 timeout=search_config.get("timeout", 10.0),
-                max_retries=search_config.get("max_retries", 3),
             )
 
         # Dynamically apply retry decorator with settings from config
